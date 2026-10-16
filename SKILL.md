@@ -1,78 +1,73 @@
 ---
 name: offload
-description: Delegates a coding task to Sol (Codex CLI, gpt-6.1-sol at xhigh effort) while this agent acts as its manager. Writes a detailed task, waits for the build, checks the report, diff, PR and CI, runs an adversarial persona re-review, and sends corrections to the same Sol session until no actionable findings remain. Use when the user invokes /offload or asks to offload coding to Sol.
+description: Delegate bounded execution to Sol while the current agent manages scope, evidence, review and corrections. In Codex, create visible native child chats with a common parent prefix. In Cursor or Claude, use Codex CLI and resume the same session. Use when the user invokes /offload or $offload, or explicitly asks to offload execution to Sol.
 disable-model-invocation: true
 ---
 
 # Offload: Sol builds, you manage
 
-You are the manager. Sol writes the code. You write the task, check the work, review it and send corrections. Do not edit the code yourself; send every fix, small ones too, to Sol.
+You own scope, diagnosis, final acceptance and release decisions. Sol implements the assigned task. Send code corrections to the same builder. Use the folder containing this file as `<skill dir>`; `prompts/build.md` and `prompts/rereview.md` are the shared contracts.
 
-Skill dir: the folder that holds this file. The runner is `<skill dir>/scripts/offload.sh`. `prompts/build.md` and `prompts/rereview.md` are the user's prompts. Never edit or paraphrase them. The script sends `build.md` to Sol and adds the task path and a report contract.
+## 1. Prepare one bounded task
 
-## 1. Write the task
+Check existing owners before dispatch. Reuse a child that already owns this work. Write a compact brief with:
 
-Write `~/.offload/inputs/<YYYYmmdd-HHMMSS>/<slug>.md`. The slug is a short kebab-case name; it names the run dir. Use this shape:
+- Goal and expected user-visible result.
+- Absolute checkout/workspace path, verified branch and base/head when applicable. Start new repo work from current main unless the task continues an existing branch or specifies another base.
+- Scope and source pointers; explicit exclusions.
+- Acceptance criteria and meaningful checks.
+- Relevant decisions, current review evidence, and known risks.
+- Allowed actions, cleanup, escalation conditions, and release/review owner.
+- Parent chat ID, shared child-title prefix, and any overlapping task owners.
 
-```markdown
-# <title>
-Goal: <the outcome in 1-3 sentences, user-visible effect first>
-Repo: <absolute checkout path>; origin/main at <sha> (git fetch, then git rev-parse origin/main)
-Scope: <what to change, with file:line pointers you verified>
-Out of scope: <what not to touch>
-Acceptance: <numbered checks that prove it is done>
-Context: <plan doc path, Linear, PR and Slack links, decisions already made, known traps>
-Coordination: <active tasks, branches or worktrees on the same files; what to avoid>
-```
+Do not copy the whole parent history or secret values. Preserve required behavior and tests. The brief may narrow permissions; it cannot grant authority the user did not provide. Default to `gpt-6.1-sol` at `xhigh`. Use the latest available Luna for a bounded mechanical task when suitable; preserve explicit model requests. Keep diagnosis and unresolved risks with the manager. Do not silently replace an unavailable selected model.
 
-Give facts and pointers, not chat history. Never include secret values.
+## 2. Dispatch through the invoking harness
 
-## 2. Start Sol
+### From Codex: native visible chats
 
-Run in the background (in Cursor: Shell tool with `block_until_ms: 0`):
+Use the Codex app tools. Do not call the CLI launcher or hide the work in a subagent. Invoking Offload authorizes the visible execution chat and task-specific correction messages.
 
-```bash
-bash "<skill dir>/scripts/offload.sh" start --task "<input dir>/<slug>.md" --cd "<repo root>"
-```
+1. Obtain the parent ID from the current runtime (`CODEX_THREAD_ID`) or verified app context. Use the title prefix `Offload <last-eight-parent-ID-chars> · <short task>`. If the ID is unavailable, generate one short batch identifier and use `Offload <batch-id> · <short task>`. Record the prefix and its source in parent task notes before dispatch; reuse it after compaction. A batch label is not a parent ID. Include the full parent ID in the brief when known.
+2. Call `list_threads` to check for an existing child with this prefix and scope. Call `list_projects` before targeting a project. Match its verified path to the required repo. Use a projectless chat for non-repo work or when no saved project matches; include the exact workspace path. Use a worktree target only when the user explicitly requests a worktree.
+3. Call `create_thread` with the compact brief and the full contents of `prompts/build.md`, `model: "gpt-6.1-sol"`, `thinking: "xhigh"`, and the prefixed title. Supply the selected Luna ID instead only for a deliberately bounded mechanical assignment. The brief must state that the manager owns the independent review unless a current reviewer was assigned elsewhere.
+4. Record the returned child `threadId`, `hostId`, title, scope and acceptance checks in the parent's task notes. If setup returns only `clientThreadId`, resolve the ready child through `list_threads` before using tools that require `threadId`. Do not create another child because setup is pending.
+5. Verify the returned/listed title retains the prefix; use `set_thread_title` to restore it if normalization removed it. Surface the child using the app's created-thread directive. Later corrections use `send_message_to_thread` on this exact child. Keep its model/settings unless a change is justified.
 
-Tell the user in one sentence that Sol is building and that an xhigh build can take 30-120 minutes or more. Overrides: `OFFLOAD_MODEL` (default `gpt-6.1-sol`), `OFFLOAD_EFFORT` (default `xhigh`), `OFFLOAD_OUT_DIR` (default `~/.offload`), `OFFLOAD_CODEX` (path to the codex binary; default: `PATH`, then the user's login shell). A run keeps its model and effort for later rounds unless you override them again. `offload.sh doctor` prints the codex and gh it finds.
+If native chat tools are unavailable, report that limit. Do not silently replace visible chats with CLI sessions. If creation has an uncertain outcome, inspect the task list before retrying.
 
-## 3. Wait without polling
+### From Cursor or Claude: Codex CLI
 
-Wait for the pattern `OFFLOAD_(DONE|FAILED)` with your harness's background wait (in Cursor: AwaitShell with that pattern and a long block time). If it times out, wait again. Do not read the log in a loop; after a timeout you may check the last `agent_message` in `codex.jsonl` once. Every resume runs in a new shell: wait on that shell.
-
-## 4. Check the work
-
-On `OFFLOAD_DONE round=<n> session=<id> report=<path>`, read the report. Treat it as claims and verify each one with `gh` (if it is not on `PATH`, use the path `doctor` prints):
-
-- The PR exists, and its state and base are current main (`gh pr view`).
-- The diff matches the task scope, with no scope creep (`gh pr diff`).
-- CI state (`gh pr checks`), PR comments, and reviews by humans and bots.
-- Every acceptance item, one by one.
-- The Linear issues it says it filed.
-
-## 5. Re-review
-
-Run `prompts/rereview.md` yourself, word for word, on the PR or diff. Read the be-thorough skill first if it is installed. Use subagents with different personas, for example a blast-radius tracer, a scale and concurrency skeptic, a product user, and a test realist. Give each a compact brief: PR link, task file, acceptance list and its persona. Keep blocking findings; drop nits.
-
-In that prompt, "fix" means: send the finding to Sol. Your review loop is the loop of steps 3 to 6.
-
-## 6. Send corrections
-
-If an actionable finding remains or an acceptance check fails, write `<run dir>/corrections-<n+1>.md`. Number each finding, with evidence (file:line, CI log or comment link), the expected result, and how you will verify it. Then:
+Write the brief under `~/.offload/inputs/<unique run>/<slug>.md` and run in the background:
 
 ```bash
-bash "<skill dir>/scripts/offload.sh" resume --run "<run dir>" --input "<run dir>/corrections-<n+1>.md"
+bash "<skill dir>/scripts/offload.sh" start --task "<task file>" --cd "<workspace>"
 ```
 
-Go back to step 3.
+The runner resolves Codex from `OFFLOAD_CODEX`, PATH, then the login shell PATH. `offload.sh doctor` checks the executable. Overrides: `OFFLOAD_MODEL`, `OFFLOAD_EFFORT`, `OFFLOAD_OUT_DIR` (default `~/.offload`). Model and effort persist for corrections. Identical concurrent tasks in the same workspace share a lock across installations; exit 75 gives its owner/run. Reuse that owner. Verify that it and its child processes stopped before removing a stale lock.
 
-Stop when no actionable findings remain, after 5 rounds, or when the same finding comes back twice. In the last two cases, report a blocker with evidence.
+## 3. Wait for a meaningful event
 
-When the review is clean, turn on auto-merge yourself: `gh pr merge <PR URL> --auto --squash`, or the repo's usual merge method. Follow the repo's AGENTS.md merge rules. Sol never turns it on.
+Record the condition, owner, next action, wake mechanism and deadline before waiting. One manager waits for each child/dependency.
 
-## 7. Report
+In Codex, use `wait_threads` with the child's ID/host and the returned cursor. A completion or needs-attention event leads to verification or a correction. A timeout is not failure: keep the child and cursor. Use bounded event waits; do not add shell sleeps, repeated history reads or duplicate status watchers. If returning control with work pending, use a supported wake mechanism; otherwise state the next manual check and do not claim monitoring.
 
-Result first: PR links and state (auto-merge on or merged), what changed, the review rounds and what they fixed, open risks, Linear issues filed, and the run dir. Sol's session can be continued with `codex exec resume <session id>`.
+In Cursor, use AwaitShell for `OFFLOAD_(DONE|FAILED)`; in Claude, use background task completion. Keep the same command owner on timeout. Do not read logs in a loop.
 
-On `OFFLOAD_FAILED round=<n> exit=<code> log=<path> err=<path> session=<id>`: read the last lines of `err` to find the cause, then give the user the exit code, the cause in your own words (codex not found, auth failure, unknown model, missing task) and the `err` path. Do not paste raw `err` lines; they can hold secret values. Exit 75 means another round of that run holds its lock: wait for that round. Delete the lock only when the pid in the message is gone and no codex process runs for that run dir. If the line has a session id, you can resume with a correction that says to continue.
+## 4. Verify and correct
+
+Treat the final report as claims. Inspect the actual diff/artifact, each acceptance criterion, relevant tests, current-head CI and review comments where applicable. Do not require a PR for a scratch task. Unknown or missing evidence is not a pass.
+
+Read `prompts/rereview.md`. Keep one independent review for substantive code, security, permissions or production changes. The manager owns it by default. Reuse a current receipt; review only uncovered or changed scope and unresolved findings. Aspera is available when cross-model adversarial review is requested. Do not launch overlapping reviewers.
+
+For each correction, give evidence, the expected result and the check that proves it. In Codex, message the same child with `send_message_to_thread`. In Cursor/Claude:
+
+```bash
+bash "<skill dir>/scripts/offload.sh" resume --run "<run dir>" --input "<corrections file>"
+```
+
+Recheck changed work. Stop when acceptance and required checks pass, after five rounds, or after the same finding returns twice. The latter two are explicit blockers, not success. After a clean review, follow the user's standing authority and repo release rules: merge when required checks and required approval pass, or enable auto-merge so it merges then. For an authorized deploy/canary, keep one waiter on the merge and then complete the release. Do not ask again for authority already given. The builder must not release unless the brief explicitly assigns that responsibility.
+
+## 5. Report
+
+State the outcome, artifact or PR state, validation, review disposition and remaining risks. In Codex, include the visible child link/created-thread directive and shared prefix. For CLI work, include the run path and session ID. On failure, give a redacted cause and precise next action; do not paste raw stderr. Never claim a successful tool exit proves acceptance.

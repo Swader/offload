@@ -1,0 +1,6 @@
+interface:
+  display_name: "Offload"
+  short_description: "Visible Sol execution with manager review"
+  default_prompt: "Use $offload to delegate this task and verify the result."
+policy:
+  allow_implicit_invocation: false
