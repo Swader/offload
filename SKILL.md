@@ -19,6 +19,7 @@ Check existing owners before dispatch. Reuse a child that already owns this work
 - Relevant decisions, current review evidence, and known risks.
 - Allowed actions, cleanup, escalation conditions, and release/review owner.
 - Parent chat ID, shared child-title prefix, and any overlapping task owners.
+- Completion route, deadline, and parent host ID when available. For a callback, include the user's exact messaging authorization and its source chat/message reference.
 
 Do not copy the whole parent history or secret values. Preserve required behavior and tests. The brief may narrow permissions; it cannot grant authority the user did not provide. Default to `gpt-6.1-sol` at `xhigh`. Use the latest available Luna for a bounded mechanical task when suitable; preserve explicit model requests. Keep diagnosis and unresolved risks with the manager. Do not silently replace an unavailable selected model.
 
@@ -30,7 +31,7 @@ Use the Codex app tools. Do not call the CLI launcher or hide the work in a suba
 
 1. Obtain the parent ID from the current runtime (`CODEX_THREAD_ID`) or verified app context. Use the title prefix `Offload <last-eight-parent-ID-chars> · <short task>`. If the ID is unavailable, generate one short batch identifier and use `Offload <batch-id> · <short task>`. Record the prefix and its source in parent task notes before dispatch; reuse it after compaction. A batch label is not a parent ID. Include the full parent ID in the brief when known.
 2. Call `list_threads` to check for an existing child with this prefix and scope. Call `list_projects` before targeting a project. Match its verified path to the required repo. Use a projectless chat for non-repo work or when no saved project matches; include the exact workspace path. Use a worktree target only when the user explicitly requests a worktree.
-3. Call `create_thread` with the compact brief and the full contents of `prompts/build.md`, `model: "gpt-6.1-sol"`, `thinking: "xhigh"`, and the prefixed title. Supply the selected Luna ID instead only for a deliberately bounded mechanical assignment. The brief must state that the manager owns the independent review unless a current reviewer was assigned elsewhere.
+3. Select the completion route in section 3 before dispatch. Call `create_thread` with the compact brief and the full contents of `prompts/build.md`, `model: "gpt-6.1-sol"`, `thinking: "xhigh"`, and the prefixed title. Honor an explicit model/effort choice; otherwise use the selected Luna ID only for a deliberately bounded mechanical assignment. The brief must state that the manager owns the independent review unless a current reviewer was assigned elsewhere.
 4. Record the returned child `threadId`, `hostId`, title, scope and acceptance checks in the parent's task notes. If setup returns only `clientThreadId`, resolve the ready child through `list_threads` before using tools that require `threadId`. Do not create another child because setup is pending.
 5. Verify the returned/listed title retains the prefix; use `set_thread_title` to restore it if normalization removed it. Surface the child using the app's created-thread directive. Later corrections use `send_message_to_thread` on this exact child. Keep its model/settings unless a change is justified.
 
@@ -48,9 +49,13 @@ The runner resolves Codex from `OFFLOAD_CODEX`, PATH, then the login shell PATH.
 
 ## 3. Wait for a meaningful event
 
-Record the condition, owner, next action, wake mechanism and deadline before waiting. One manager waits for each child/dependency.
+Record the condition, owner, next action, completion route and deadline before waiting. Keep one completion route and one owner per child/dependency.
 
-In Codex, use `wait_threads` with the child's ID/host and the returned cursor. A completion or needs-attention event leads to verification or a correction. A timeout is not failure: keep the child and cursor. Use bounded event waits; do not add shell sleeps, repeated history reads or duplicate status watchers. If returning control with work pending, use a supported wake mechanism; otherwise state the next manual check and do not claim monitoring.
+In Codex, prefer a child-to-parent callback when the user explicitly authorized it and the messaging tool is available. Carry that authorization and its source into the brief; a manager's request to report back is not user authorization. The child sends one `done` or actionable `blocked` message per assigned round, with the result location and evidence needed for the next action. Do not send routine updates, acknowledgements, or a second completion message.
+
+For callback work, reuse or register one deadline-only wake through the supported scheduling tool to catch a missing result. Record its ID and cancel it when a result arrives. The deadline wake checks the existing child once; it must not start a duplicate worker or recurring status loop. After dispatch and wake registration, return control. Do not also run `wait_threads`, poll logs, or schedule periodic heartbeats. If no deadline wake is supported, state that failure detection is unavailable and give the next manual check; do not claim that the callback detects a crashed worker.
+
+Without callback authority or capability, use `wait_threads` with the child's ID/host and current cursor. Do not ask for permission solely to enable a callback. Completion or needs-attention leads to verification or correction. A timeout is not failure: retain the child and cursor. Do not turn timeouts into short polling, repeated history reads, or extra status messages. If returning control, use a supported wake mechanism or state the next manual check without claiming ongoing monitoring.
 
 In Cursor, use AwaitShell for `OFFLOAD_(DONE|FAILED)`; in Claude, use background task completion. Keep the same command owner on timeout. Do not read logs in a loop.
 
@@ -70,4 +75,4 @@ Recheck changed work. Stop when acceptance and required checks pass, after five 
 
 ## 5. Report
 
-State the outcome, artifact or PR state, validation, review disposition and remaining risks. In Codex, include the visible child link/created-thread directive and shared prefix. For CLI work, include the run path and session ID. On failure, give a redacted cause and precise next action; do not paste raw stderr. Never claim a successful tool exit proves acceptance.
+State the outcome, artifact or PR state, validation, review disposition and remaining risks. In Codex, include the visible child link/created-thread directive and shared prefix. For CLI work, include the run path and session ID. On failure, give a redacted cause and precise next action; do not paste raw stderr. A callback reports that a result is ready; it does not establish acceptance. Never claim a successful tool exit proves acceptance.

@@ -7,7 +7,7 @@ Offload delegates bounded execution to Sol while your agent manages scope, verif
 | Codex | Native sidebar-visible Codex chat |
 | Cursor or Claude Code | Codex CLI, with corrections in the same session |
 
-Codex children share a title prefix, `Offload <parent-ID-suffix> · <task>`, and include the full parent ID in their brief. The manager checks existing owners, waits through native task tools and sends corrections to the same child. If native tools are unavailable, it reports the limit rather than hiding the work in a CLI session. See [SKILL.md](SKILL.md).
+Codex children share a title prefix, `Offload <parent-ID-suffix> · <task>`, and include the full parent ID in their brief. When the user authorizes a callback, the child sends one completion or blocker message and the manager returns control, with one deadline wake for a missing result. Otherwise the manager uses the native event wait. These routes do not run together. Corrections go to the same child. If native tools are unavailable, the manager reports the limit rather than hiding the work in a CLI session. See [SKILL.md](SKILL.md).
 
 ## Install once, link each harness
 
